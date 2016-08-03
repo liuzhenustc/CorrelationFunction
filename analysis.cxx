@@ -71,18 +71,24 @@ TH1D *hEvent;
 
 TH1D *hnPiTrig;
 TH1D *hTrigPt;
+TH1D *hAssocPt;
 TH1D *hLeftTrigPt;
 TH1D *hRightTrigPt;
-TH1D *hAssocPt;
 TH1D *hLeftAssocPt;
 TH1D *hRightAssocPt;
+TH1D *hRightAssocEta;
+
+THnSparseD *hDetaDphiVsPtReal;
 
 THnSparseD *hDetaDphiVsPtPxLeftClose;
 THnSparseD *hDetaDphiVsPtPxLeftFar;
 THnSparseD *hDetaDphiVsPtPxRightClose;
 THnSparseD *hDetaDphiVsPtPxRightFar;
 
-THnSparseD *hDetaDphiVsPtMix;
+THnSparseD *hDetaDphiVsPtMixPxLClose;
+THnSparseD *hDetaDphiVsPtMixPxRClose;
+THnSparseD *hDetaDphiVsPtMixPxLFar;
+THnSparseD *hDetaDphiVsPtMixPxRFar;
 
 const Int_t dimCor = 4;
 const Int_t nCorBins[dimCor]={400,400,32,96};//trigPt;AssocPt;dEta;dPhi
@@ -97,11 +103,13 @@ Bool_t passPion(miniDst* evt,Int_t nTrks);
 Bool_t passPionForReal(LorentzVec vec);
 Bool_t isPxEvent(Float_t Px,Short_t cen,Float_t PxCut);
 Bool_t isPiTrgEvent(miniDst* evt,Int_t nTrks);
-Bool_t GetPtPointer(LorentzVec vecCandidate);
-Bool_t makeMixPairs(LorentzVec vecTrig,THnSparseD *hn);
-void copyToBuffer(LorentzVec vecCandidate);
 void makeRealPairs(LorentzVec vecTrig,LorentzVec vecAssoc,THnSparseD *hn);
-void copyToBuffer(LorentzVec vecTrig,LorentzVec vecAssoc,THnSparseD *hn);
+Bool_t GetPtPointer(LorentzVec vecCandidate, Int_t *ptP);
+void makeMixPairs( LorentzVec vecTrig, TLorentzVector bufferPi, THnSparseD *hn);
+void copyToBufferPxLClose();
+void copyToBufferPxLFar();
+void copyToBufferPxRClose();
+void copyToBufferPxRFar();
 void comparePt(TLorentzVector* vec1 ,TLorentzVector* vec2);
 
 const Bool_t debug = 0;
@@ -125,6 +133,7 @@ Double_t reWeight = 1.;
 
 LorentzVec PiCandidate;
 LorentzVec PiTrig;
+LorentzVec PiAssoc;
 //assoc
 LorentzVec PxLeftPiClose;
 LorentzVec PxRightPiClose;
@@ -143,10 +152,19 @@ const Int_t mPtBins = 8; //1-2;2-3;3-4;4-5;5-6,6-7,7-8,>8
 const Int_t mMaxEvtsInBuffer = 100; //default:50
 const Double_t VzCut = 100.;
 
-Int_t cenPointer, vzPointer,ptPointer;
-Int_t nEvtsInBuffer[mCenBins][mVzBins][mPtBins];
-Bool_t bufferFullFlag[mCenBins][mVzBins][mPtBins];
-LorentzVec bufferPi[mCenBins][mVzBins][mPtBins][mMaxEvtsInBuffer];
+Int_t cenPointer, vzPointer;
+Int_t ptPointerPxLClose, ptPointerPxLFar, ptPointerPxRClose, ptPointerPxRFar;
+Bool_t bufferFullFlag;
+
+Int_t nPxLCloseInBuffer[mCenBins][mVzBins][mPtBins];
+Int_t nPxRCloseInBuffer[mCenBins][mVzBins][mPtBins];
+Int_t nPxLFarInBuffer[mCenBins][mVzBins][mPtBins];
+Int_t nPxRFarInBuffer[mCenBins][mVzBins][mPtBins];
+
+LorentzVec bufferPxLClose[mCenBins][mVzBins][mPtBins][mMaxEvtsInBuffer];
+LorentzVec bufferPxRClose[mCenBins][mVzBins][mPtBins][mMaxEvtsInBuffer];
+LorentzVec bufferPxLFar[mCenBins][mVzBins][mPtBins][mMaxEvtsInBuffer];
+LorentzVec bufferPxRFar[mCenBins][mVzBins][mPtBins][mMaxEvtsInBuffer];
 //----------------------------------
 
 int main(int argc, char** argv)
@@ -190,6 +208,8 @@ int main(int argc, char** argv)
 
     bookHistograms();
 
+    memset(nPxLCloseInBuffer,0,sizeof(nPxLCloseInBuffer));
+
     miniDst *event = new miniDst(chain);
 
     Int_t nEvts = chain->GetEntries();
@@ -206,14 +226,13 @@ int main(int argc, char** argv)
         event->GetEntry(i);
 
         PiTrig.clear();
+        PiAssoc.clear();
         PiCandidate.clear();
-
         //assoc
         PxLeftPiClose.clear();
         PxLeftPiFar.clear();
         PxRightPiClose.clear();
         PxRightPiFar.clear();
-
         //trig
         PxLTrigPiClose.clear();
         PxLTrigPiFar.clear();
@@ -227,12 +246,6 @@ int main(int argc, char** argv)
         centrality16 = event -> mCentrality16;
         PxL = event -> mPxL;
         PxR = event -> mPxR;
-        if(debug)cout<<"NTrk: "<<NTrk;
-        if(debug)cout<<"  TpcVz: "<<vz;
-        if(debug)cout<<"  centrality9: "<<centrality9;
-        if(debug)cout<<"  centrality16: "<<centrality16;
-        if(debug)cout<<"  PxL: "<<PxL;
-        if(debug)cout<<"  PxR: "<<PxR<<endl;
         //----------------------------
         if(!passEvent(event)) continue;
         hEvent->Fill(0.5);
@@ -240,12 +253,13 @@ int main(int argc, char** argv)
         //get cen vz  pointer
         cenPointer = centrality9;
         vzPointer = (Int_t)( (vz+VzCut)/(2*VzCut)*mVzBins );
-        if(debug)cout<<"vzPointer:  "<<vzPointer<<endl;
 
         isPxL = isPxEvent(PxL,cenPointer,PxLcut[cenPointer]);
         isPxR = isPxEvent(PxR,cenPointer,PxRcut[cenPointer]);
 
         if(!isPiTrgEvent(event,NTrk)) continue;//Get PiCandidate
+
+        //---Fill event
         hEvent->Fill(1.5);
         if(!isPxL && !isPxR) hEvent->Fill(2.5);
         if(isPxL && !isPxR) hEvent->Fill(3.5);
@@ -253,68 +267,124 @@ int main(int argc, char** argv)
         if(isPxL && isPxR) hEvent->Fill(5.5);
 
         if(!passPion(event,NTrk)) continue;//Get Pion Candidate
+
+        //*********for check******************
+        PiTrig.push_back(PiCandidate[0]);
+        for(unsigned int i=1; i<PiCandidate.size(); i++){
+            PiAssoc.push_back(PiCandidate[i]);
+        }
+        makeRealPairs(PiTrig, PiAssoc, hDetaDphiVsPtReal);
+        //************************************
+
         if(!passPionForReal(PiCandidate)) continue;//select by eta range
 
+        //**********PxLClose*****
         unsigned int nTrig = 0, nAssoc = 0; 
         nTrig = PxLTrigPiClose.size();nAssoc = PxLeftPiClose.size();
         if( nTrig != 0 && nAssoc != 0 ){ 
             hnPiTrig->Fill(1.5);
-            makeRealPairs(PxLTrigPiClose ,PxLeftPiClose,hDetaDphiVsPtPxLeftClose);}
+            makeRealPairs(PxLTrigPiClose ,PxLeftPiClose,hDetaDphiVsPtPxLeftClose);
 
+            ptPointerPxLClose = -1;
+            if(!GetPtPointer(PxLTrigPiClose, &ptPointerPxLClose)) continue;
+            if(debug) cout<<"ptPointerPxLClose: "<<ptPointerPxLClose<<endl;
+            for(Int_t i=0; i<mPtBins; i++){
+                Int_t nEvtInBuf =nPxLCloseInBuffer[cenPointer][vzPointer][ptPointerPxLClose]; 
+                for(Int_t j=0; j<nEvtInBuf; j++){
+                    Int_t nVecSize = bufferPxLClose[cenPointer][vzPointer][i][j].size();
+                    for(Int_t k=0; k<nVecSize; k++){
+                        Float_t pt = bufferPxLClose[cenPointer][vzPointer][i][j][k].Pt();
+                        Float_t eta = bufferPxLClose[cenPointer][vzPointer][i][j][k].Eta();
+                        Float_t phi = bufferPxLClose[cenPointer][vzPointer][i][j][k].Phi();
+                        TLorentzVector fourmom(0,0,0,0);
+                        fourmom.SetPtEtaPhiM(pt,eta,phi,Mpi);
+                        makeMixPairs(PxLTrigPiClose, fourmom, hDetaDphiVsPtMixPxLClose);
+                    }
+                }
+            }
+            copyToBufferPxLClose();
+        }
+
+        //*********PxLFar******
         nTrig = 0; nAssoc = 0;
         nTrig = PxLTrigPiFar.size();nAssoc = PxLeftPiFar.size();
         if( nTrig != 0 && nAssoc != 0 ){ 
             hnPiTrig->Fill(2.5);
-            makeRealPairs(PxLTrigPiFar ,PxLeftPiFar,hDetaDphiVsPtPxLeftFar);}
+            makeRealPairs(PxLTrigPiFar ,PxLeftPiFar,hDetaDphiVsPtPxLeftFar);
 
+            ptPointerPxLFar = -1;
+            if(!GetPtPointer(PxLTrigPiFar, &ptPointerPxLFar)) continue;
+            if(debug) cout<<"ptPointerPxLFar: "<<ptPointerPxLFar<<endl;
+            for(Int_t i=0; i<mPtBins; i++){
+                Int_t nEvtInBuf =nPxLFarInBuffer[cenPointer][vzPointer][ptPointerPxLFar]; 
+                for(Int_t j=0; j<nEvtInBuf; j++){
+                    Int_t nVecSize = bufferPxLFar[cenPointer][vzPointer][i][j].size();
+                    for(Int_t k=0; k<nVecSize; k++){
+                        Float_t pt = bufferPxLFar[cenPointer][vzPointer][i][j][k].Pt();
+                        Float_t eta = bufferPxLFar[cenPointer][vzPointer][i][j][k].Eta();
+                        Float_t phi = bufferPxLFar[cenPointer][vzPointer][i][j][k].Phi();
+                        TLorentzVector fourmom(0,0,0,0);
+                        fourmom.SetPtEtaPhiM(pt,eta,phi,Mpi);
+                        makeMixPairs(PxLTrigPiFar, fourmom, hDetaDphiVsPtMixPxLFar);
+                    }
+                }
+            }
+            copyToBufferPxLFar();
+        }
+
+        //*********PxRClose******
         nTrig = 0; nAssoc = 0; 
         nTrig = PxRTrigPiClose.size();nAssoc = PxRightPiClose.size();
         if( nTrig != 0 && nAssoc != 0 ){ 
             hnPiTrig->Fill(4.5);
-            makeRealPairs(PxRTrigPiClose ,PxRightPiClose,hDetaDphiVsPtPxRightClose);}
+            makeRealPairs(PxRTrigPiClose ,PxRightPiClose,hDetaDphiVsPtPxRightClose);
 
+            ptPointerPxRClose = -1;
+            if(!GetPtPointer(PxRTrigPiClose, &ptPointerPxRClose)) continue;
+            if(debug) cout<<"ptPointerPxRClose: "<<ptPointerPxRClose<<endl;
+            for(Int_t i=0; i<mPtBins; i++){
+                Int_t nEvtInBuf =nPxRCloseInBuffer[cenPointer][vzPointer][ptPointerPxRClose]; 
+                for(Int_t j=0; j<nEvtInBuf; j++){
+                    Int_t nVecSize = bufferPxRClose[cenPointer][vzPointer][i][j].size();
+                    for(Int_t k=0; k<nVecSize; k++){
+                        Float_t pt = bufferPxRClose[cenPointer][vzPointer][i][j][k].Pt();
+                        Float_t eta = bufferPxRClose[cenPointer][vzPointer][i][j][k].Eta();
+                        Float_t phi = bufferPxRClose[cenPointer][vzPointer][i][j][k].Phi();
+                        TLorentzVector fourmom(0,0,0,0);
+                        fourmom.SetPtEtaPhiM(pt,eta,phi,Mpi);
+                        makeMixPairs(PxRTrigPiClose, fourmom, hDetaDphiVsPtMixPxRClose);
+                    }
+                }
+            }
+            copyToBufferPxRClose();
+        }
+
+        //********PxRFar*******
         nTrig = 0; nAssoc = 0;
         nTrig = PxRTrigPiFar.size();nAssoc = PxRightPiFar.size();
         if( nTrig != 0 && nAssoc != 0 ){
             hnPiTrig->Fill(5.5);
-            makeRealPairs(PxRTrigPiFar ,PxRightPiFar,hDetaDphiVsPtPxRightFar);}
+            makeRealPairs(PxRTrigPiFar ,PxRightPiFar,hDetaDphiVsPtPxRightFar);
 
-        //GetPtPointer(PiCandidate);
-        //if(debug) cout<<"ptPointer: "<<ptPointer<<endl;
-
-
-        //hTrigPt->Fill(PiCandidate[0].Pt());
-        //for(unsigned int i=1;i<PiCandidate.size();i++) hAssocPt->Fill(PiCandidate[i].Pt());//associate
-        //hnPiTrig->Fill(7.5);//trigger
-
-        //if(debug) cout<<"# of Trigger Particle "<<PiTrig.size()<<endl;
-        //if(isPxL){
-        //    hLeftTrigPt->Fill(PiCandidate[0].Pt());
-        //    hnPiTrig->Fill(0.5);
-        //    if(makeRealPairs(PiTrig,PxLeftPiClose,hDetaDphiVsPtPxLeftClose)) 
-        //        hnPiTrig->Fill(1.5);
-        //    if(PxLeftPiClose.size()!=0){ for(unsigned int i=0;i<PxLeftPiClose.size();i++) hLeftAssocPt->Fill(PxLeftPiClose[i].Pt());}
-        //    if(makeRealPairs(PiTrig,PxLeftPiFar,hDetaDphiVsPtPxLeftFar)) 
-        //        hnPiTrig->Fill(2.5);
-        //    if(PxLeftPiFar.size()!=0){ for(unsigned int i=0;i<PxLeftPiFar.size();i++) hLeftAssocPt->Fill(PxLeftPiFar[i].Pt());}
-        //}
-        //if(isPxR){
-        //    hRightTrigPt->Fill(PiCandidate[0].Pt());
-        //    hnPiTrig->Fill(3.5);
-        //    if(makeRealPairs(PiTrig,PxRightPiClose,hDetaDphiVsPtPxRightClose)) 
-        //        hnPiTrig->Fill(4.5);
-        //    if(PxRightPiClose.size()!=0){ for(unsigned int i=0;i<PxRightPiClose.size();i++) hRightAssocPt->Fill(PxRightPiClose[i].Pt());}
-        //    if(makeRealPairs(PiTrig,PxRightPiFar,hDetaDphiVsPtPxRightFar)) 
-        //        hnPiTrig->Fill(5.5);
-        //    if(PxRightPiFar.size()!=0){ for(unsigned int i=0;i<PxRightPiFar.size();i++) hRightAssocPt->Fill(PxRightPiFar[i].Pt());}
-        //}
-        //if(isPxL && isPxR){
-        //    hnPiTrig->Fill(6.5);
-        //}
-
-        //if(debug)cout<<"mix event"<<endl;
-        //makeMixPairs(PiTrig,hDetaDphiVsPtMix);
-        //copyToBuffer(PiCandidate);
+            ptPointerPxRFar = -1;
+            if(!GetPtPointer(PxRTrigPiFar, &ptPointerPxRFar)) continue;
+            if(debug) cout<<"ptPointerPxRFar: "<<ptPointerPxRFar<<endl;
+            for(Int_t i=0; i<mPtBins; i++){
+                Int_t nEvtInBuf =nPxRFarInBuffer[cenPointer][vzPointer][ptPointerPxRFar]; 
+                for(Int_t j=0; j<nEvtInBuf; j++){
+                    Int_t nVecSize = bufferPxRFar[cenPointer][vzPointer][i][j].size();
+                    for(Int_t k=0; k<nVecSize; k++){
+                        Float_t pt = bufferPxRFar[cenPointer][vzPointer][i][j][k].Pt();
+                        Float_t eta = bufferPxRFar[cenPointer][vzPointer][i][j][k].Eta();
+                        Float_t phi = bufferPxRFar[cenPointer][vzPointer][i][j][k].Phi();
+                        TLorentzVector fourmom(0,0,0,0);
+                        fourmom.SetPtEtaPhiM(pt,eta,phi,Mpi);
+                        makeMixPairs(PxRTrigPiFar, fourmom, hDetaDphiVsPtMixPxRFar);
+                    }
+                }
+            }
+            copyToBufferPxRFar();
+        }
 
     }
 
@@ -389,69 +459,53 @@ Bool_t passPionForReal(LorentzVec vec)
     for(Int_t i=1; i<nvec; i++){
         comparePt(&vec[0],&vec[i]);
     }
+    if(debug) cout<<"PassPionForReal: trigPt: "<<vec[0].Pt()<<endl;
 
     Int_t nPxLClose = 0;
     Int_t nPxLFar = 0;
     if(isPxL){
         hEvent->Fill(6.5);
+        hnPiTrig->Fill(0.5);
         for(Int_t i=1; i<nvec; i++){
             Float_t eta = vec[i].Eta();
-            if(debug) cout<<eta<<endl;
             if(eta<0 && eta>-0.5) {
-                if(debug) cout<<"isPxLClose eta: "<<eta;
                 PxLeftPiClose.push_back(vec[i]);
                 nPxLClose++;
             }
-            else if(eta>0 && eta<0.5) {
-                if(debug) cout<<"isPxLFar eta: "<<eta;
+            if(eta>0 && eta<0.5) {
                 PxLeftPiFar.push_back(vec[i]);
                 nPxLFar++;
             }
         }
         if( nPxLClose>0 && nPxLClose==(Int_t)PxLeftPiClose.size() ) 
-        {PxLTrigPiClose.push_back(vec[0]);hnPiTrig->Fill(0.5);}
-        if(nPxLFar>0 && nPxLFar==(Int_t)PxLeftPiFar.size() ) 
+        {PxLTrigPiClose.push_back(vec[0]);}
+        if( nPxLFar>0 && nPxLFar==(Int_t)PxLeftPiFar.size() ) 
             PxLTrigPiFar.push_back(vec[0]);
-        if(debug){
-            cout<<"passPionForReal isPxL: "<<isPxL
-                <<" ; nClose: "<<nPxLClose<<" ; "<<PxLeftPiClose.size()
-                <<" ; TrigClose: "<<PxLeftPiClose.size()
-                <<" ; nFar: "<<nPxLFar<<" ; "<<PxLeftPiFar.size()
-                <<" ; TrigFar: "<<PxLeftPiFar.size()
-                <<" ; "<<endl;
-        }
     }
 
     Int_t nPxRClose = 0;
     Int_t nPxRFar = 0;
     if(isPxR){
         hEvent->Fill(7.5);
+        hnPiTrig->Fill(3.5);
         for(Int_t i=1;i<nvec ; i++){
             Float_t eta = vec[i].Eta();
-            if(debug) cout<<eta<<endl;
+            hRightAssocEta->Fill(eta);
             if(eta<0 && eta>-0.5){
-                if(debug) cout<<"isPxRFar eta: "<<eta;
                 PxRightPiFar.push_back(vec[i]);
-                nPxRClose++;
-            }
-            else if(eta>0 && eta<0.5){
-                if(debug) cout<<"isPxRClose eta: "<<eta;
-                PxRightPiClose.push_back(vec[i]);
                 nPxRFar++;
             }
+            if(debug && nPxRFar==0) cout<<"PxR not far eta: "<<eta<<endl;
+            if(eta>0 && eta<0.5){
+                PxRightPiClose.push_back(vec[i]);
+                nPxRClose++;
+            }
+            if(debug && nPxRClose==0 && nPxRFar==0 ) cout<<"PxR not both close and far eta: "<<eta<<endl;
         }
         if( nPxRClose>0 && nPxRClose==(Int_t)PxRightPiClose.size() ) 
-        {PxRTrigPiClose.push_back(vec[0]);hnPiTrig->Fill(3.5);}
-        if(nPxRFar>0 && nPxRFar==(Int_t)PxRightPiFar.size() ) 
-            PxRTrigPiFar.push_back(vec[0]);
-        if(debug){
-            cout<<"passPionForReal isPxR: "<<isPxR
-                <<" ; nClose: "<<nPxRClose<<" ; "<<PxRightPiClose.size()
-                <<" ; TrigClose: "<<PxRightPiClose.size()
-                <<" ; nFar: "<<nPxRFar<<" ; "<<PxRightPiFar.size()
-                <<" ; TrigFar: "<<PxRightPiFar.size()
-                <<" ; "<<endl;
-        }
+        {PxRTrigPiClose.push_back(vec[0]);}
+        if( nPxRFar>0 && nPxRFar==(Int_t)PxRightPiFar.size() ) 
+        {PxRTrigPiFar.push_back(vec[0]);}
     }
     return kTRUE;
 }
@@ -497,14 +551,14 @@ Bool_t isPiTrgEvent( miniDst* evt, Int_t nTrks )
     else return kFALSE;
 }
 //-------------------------------------------
-void makeRealPairs(LorentzVec vecTrig,LorentzVec vecAssoc,THnSparseD *hn)
+void makeRealPairs(LorentzVec vecTrig, LorentzVec vecAssoc,THnSparseD *hn)
 {
-    unsigned int nVecAssoc = vecAssoc.size();
     Float_t TrigPt = vecTrig[0].Pt();
     Float_t TrigEta = vecTrig[0].Eta();
     Float_t TrigPhi = vecTrig[0].Phi();
 
-    for(unsigned int i =0;i<nVecAssoc;i++){
+    Int_t nVec = vecAssoc.size();
+    for(Int_t i=0; i<nVec; i++){
         Float_t AssocPt = vecAssoc[i].Pt();
         Float_t AssocEta = vecAssoc[i].Eta();
         Float_t AssocPhi = vecAssoc[i].Phi();
@@ -519,81 +573,138 @@ void makeRealPairs(LorentzVec vecTrig,LorentzVec vecAssoc,THnSparseD *hn)
     }
 }
 //-------------------------------------------
-Bool_t GetPtPointer(LorentzVec vecCandidate)
-{
+Bool_t GetPtPointer(LorentzVec vecCandidate, Int_t *ptPointer)
+{//to select trigger particle 
     Int_t nVec = vecCandidate.size();
-    for(Int_t i=0;i<nVec;i++){
-        comparePt(&vecCandidate[0],&vecCandidate[i]);
-    }
+    if(nVec<1)     return kFALSE;
+    if(nVec!=1){
+        for(Int_t i=0;i<nVec;i++){
+            comparePt(&vecCandidate[0],&vecCandidate[i]);
+        }}
     Float_t candidatePt = vecCandidate[0].Pt();
-    if(1.<candidatePt && candidatePt<2.) ptPointer=0;
-    else if(2.<candidatePt && candidatePt<3.) ptPointer=1;
-    else if(3.<candidatePt && candidatePt<4.) ptPointer=2;
-    else if(4.<candidatePt && candidatePt<5.) ptPointer=3;
-    else if(5.<candidatePt && candidatePt<6.) ptPointer=4;
-    else if(6.<candidatePt && candidatePt<7.) ptPointer=5;
-    else if(7.<candidatePt && candidatePt<8.) ptPointer=6;
-    else if(8.<candidatePt) ptPointer=7;
 
-    if(debug)cout<<"GetPtPointer: "<<candidatePt<<"  prPointer: "<<ptPointer<<endl;
+    Int_t ptP = -1;
+    if(1.<candidatePt && candidatePt<2.) ptP=0;
+    else if(2.<candidatePt && candidatePt<3.) ptP=1;
+    else if(3.<candidatePt && candidatePt<4.) ptP=2;
+    else if(4.<candidatePt && candidatePt<5.) ptP=3;
+    else if(5.<candidatePt && candidatePt<6.) ptP=4;
+    else if(6.<candidatePt && candidatePt<7.) ptP=5;
+    else if(7.<candidatePt && candidatePt<8.) ptP=6;
+    else if(8.<candidatePt) ptP=7;
 
-    return kFALSE;
+    *ptPointer = ptP;
+    return kTRUE;
 } 
 //-------------------------------------------
-Bool_t makeMixPairs(LorentzVec vecTrig,THnSparseD *hn)
+void makeMixPairs( LorentzVec vecTrig, TLorentzVector bufferPi, THnSparseD *hn)
 {
-    Int_t nRealtrig = vecTrig.size();
-    if(nRealtrig!=1){
-        cout<<"Trigger Particle error"<<endl;
-        return kFALSE;
-    }
-
     Float_t TrigPt = vecTrig[0].Pt();
     Float_t TrigEta = vecTrig[0].Eta();
     Float_t TrigPhi = vecTrig[0].Phi();
 
-    for(Int_t k=0;k<mPtBins;k++){
-        ptPointer = k;
-        for(Int_t evtPointer =0;evtPointer < nEvtsInBuffer[cenPointer][vzPointer][ptPointer];evtPointer++){
-            Int_t nbufferPi = bufferPi[cenPointer][vzPointer][ptPointer][evtPointer].size();
-            for(Int_t i=0;i<nbufferPi;i++){
-                Float_t BufferPt = bufferPi[cenPointer][vzPointer][ptPointer][evtPointer][i].Pt();
-                Float_t BufferEta = bufferPi[cenPointer][vzPointer][ptPointer][evtPointer][i].Eta();
-                Float_t BufferPhi = bufferPi[cenPointer][vzPointer][ptPointer][evtPointer][i].Phi();
+    Float_t BufferPt = bufferPi.Pt();
+    Float_t BufferEta = bufferPi.Eta();
+    Float_t BufferPhi = bufferPi.Phi();
 
-                Float_t dEta = BufferEta - TrigEta;
-                Float_t dPhi = BufferPhi - TrigPhi;
-                if(dPhi < -TMath::Pi()/2.) dPhi += 2*TMath::Pi();
-                if(dPhi > 3*TMath::Pi()/2.) dPhi -= 2*TMath::Pi();
-                Double_t fill[]={TrigPt,BufferPt,dEta,dPhi};
-                hDetaDphiVsPtMix->Fill(fill);
-            }
-        }
-    }
-    return kTRUE;
+    Float_t dEta = BufferEta - TrigEta;
+    Float_t dPhi = BufferPhi - TrigPhi;
+    if(dPhi < -TMath::Pi()/2.) dPhi += 2*TMath::Pi();
+    if(dPhi > 3*TMath::Pi()/2.) dPhi -= 2*TMath::Pi();
+    Double_t fill[]={TrigPt,BufferPt,dEta,dPhi};
+    hn->Fill(fill);
 }
 //-------------------------------------------
-void copyToBuffer(LorentzVec vecCandidate)
+void copyToBufferPxLClose()
 {
-    if(nEvtsInBuffer[cenPointer][vzPointer][ptPointer]>=mMaxEvtsInBuffer){
-        bufferFullFlag[cenPointer][vzPointer][ptPointer] = kTRUE;
+    if(nPxLCloseInBuffer[cenPointer][vzPointer][ptPointerPxLClose]>=mMaxEvtsInBuffer){
+        bufferFullFlag = kTRUE;
     }//full flag
     TRandom3 *gRandom = new TRandom3(iran++);
     Int_t evtPointer = -1;
-    if(bufferFullFlag[cenPointer][vzPointer][ptPointer]) evtPointer = (Int_t)gRandom->Uniform(0,mMaxEvtsInBuffer-1.e-6);
-    else evtPointer = nEvtsInBuffer[cenPointer][vzPointer][ptPointer];
+    if( bufferFullFlag ) evtPointer = (Int_t)gRandom->Uniform(0,mMaxEvtsInBuffer-1.e-6);
+    else evtPointer = nPxLCloseInBuffer[cenPointer][vzPointer][ptPointerPxLClose];
     delete gRandom;
 
-    bufferPi[cenPointer][vzPointer][ptPointer][evtPointer].clear();
-    Int_t nVec = vecCandidate.size();
-    if(debug) cout<<" evtPointer: "<<evtPointer<<endl;
-    for(Int_t i=0;i<nVec;i++){
-        bufferPi[cenPointer][vzPointer][ptPointer][evtPointer].push_back(vecCandidate[i]);
-    }
-    if(nEvtsInBuffer[cenPointer][vzPointer][ptPointer]<mMaxEvtsInBuffer){
-        nEvtsInBuffer[cenPointer][vzPointer][ptPointer]++;
-    }
+    bufferPxLClose[cenPointer][vzPointer][ptPointerPxLClose][evtPointer].clear();
 
+    bufferPxLClose[cenPointer][vzPointer][ptPointerPxLClose][evtPointer].push_back(PxLTrigPiClose[0]);
+    Int_t nVec = PxLeftPiClose.size();
+    for(Int_t i=0;i<nVec;i++){
+        bufferPxLClose[cenPointer][vzPointer][ptPointerPxLClose][evtPointer].push_back(PxLeftPiClose[i]);
+    }
+    if(nPxLCloseInBuffer[cenPointer][vzPointer][ptPointerPxLClose] < mMaxEvtsInBuffer){
+        nPxLCloseInBuffer[cenPointer][vzPointer][ptPointerPxLClose]++;
+    }
+}
+//-------------------------------------------
+void copyToBufferPxLFar()
+{
+    if(nPxLFarInBuffer[cenPointer][vzPointer][ptPointerPxLFar]>=mMaxEvtsInBuffer){
+        bufferFullFlag = kTRUE;
+    }//full flag
+    TRandom3 *gRandom = new TRandom3(iran++);
+    Int_t evtPointer = -1;
+    if( bufferFullFlag ) evtPointer = (Int_t)gRandom->Uniform(0,mMaxEvtsInBuffer-1.e-6);
+    else evtPointer = nPxLFarInBuffer[cenPointer][vzPointer][ptPointerPxLFar];
+    delete gRandom;
+
+    bufferPxLFar[cenPointer][vzPointer][ptPointerPxLFar][evtPointer].clear();
+
+    bufferPxLFar[cenPointer][vzPointer][ptPointerPxLFar][evtPointer].push_back(PxLTrigPiFar[0]);
+    Int_t nVec = PxLeftPiFar.size();
+    for(Int_t i=0;i<nVec;i++){
+        bufferPxLFar[cenPointer][vzPointer][ptPointerPxLFar][evtPointer].push_back(PxLeftPiFar[i]);
+    }
+    if(nPxLFarInBuffer[cenPointer][vzPointer][ptPointerPxLFar] < mMaxEvtsInBuffer){
+        nPxLFarInBuffer[cenPointer][vzPointer][ptPointerPxLFar]++;
+    }
+}
+//-------------------------------------------
+void copyToBufferPxRClose()
+{
+    if(nPxRCloseInBuffer[cenPointer][vzPointer][ptPointerPxRClose]>=mMaxEvtsInBuffer){
+        bufferFullFlag = kTRUE;
+    }//full flag
+    TRandom3 *gRandom = new TRandom3(iran++);
+    Int_t evtPointer = -1;
+    if( bufferFullFlag ) evtPointer = (Int_t)gRandom->Uniform(0,mMaxEvtsInBuffer-1.e-6);
+    else evtPointer = nPxRCloseInBuffer[cenPointer][vzPointer][ptPointerPxRClose];
+    delete gRandom;
+
+    bufferPxRClose[cenPointer][vzPointer][ptPointerPxRClose][evtPointer].clear();
+
+    bufferPxRClose[cenPointer][vzPointer][ptPointerPxRClose][evtPointer].push_back(PxRTrigPiClose[0]);
+    Int_t nVec = PxRightPiClose.size();
+    for(Int_t i=0;i<nVec;i++){
+        bufferPxRClose[cenPointer][vzPointer][ptPointerPxRClose][evtPointer].push_back(PxRightPiClose[i]);
+    }
+    if(nPxRCloseInBuffer[cenPointer][vzPointer][ptPointerPxRClose] < mMaxEvtsInBuffer){
+        nPxRCloseInBuffer[cenPointer][vzPointer][ptPointerPxRClose]++;
+    }
+}
+//-------------------------------------------
+void copyToBufferPxRFar()
+{
+    if(nPxRFarInBuffer[cenPointer][vzPointer][ptPointerPxRFar]>=mMaxEvtsInBuffer){
+        bufferFullFlag = kTRUE;
+    }//full flag
+    TRandom3 *gRandom = new TRandom3(iran++);
+    Int_t evtPointer = -1;
+    if( bufferFullFlag ) evtPointer = (Int_t)gRandom->Uniform(0,mMaxEvtsInBuffer-1.e-6);
+    else evtPointer = nPxRFarInBuffer[cenPointer][vzPointer][ptPointerPxRFar];
+    delete gRandom;
+
+    bufferPxRFar[cenPointer][vzPointer][ptPointerPxRFar][evtPointer].clear();
+
+    bufferPxRFar[cenPointer][vzPointer][ptPointerPxRFar][evtPointer].push_back(PxRTrigPiFar[0]);
+    Int_t nVec = PxRightPiFar.size();
+    for(Int_t i=0;i<nVec;i++){
+        bufferPxRFar[cenPointer][vzPointer][ptPointerPxRFar][evtPointer].push_back(PxRightPiFar[i]);
+    }
+    if(nPxRFarInBuffer[cenPointer][vzPointer][ptPointerPxRFar] < mMaxEvtsInBuffer){
+        nPxRFarInBuffer[cenPointer][vzPointer][ptPointerPxRFar]++;
+    }
 }
 //-------------------------------------------
 void bookHistograms()
@@ -614,10 +725,10 @@ void bookHistograms()
     hEvent->GetXaxis()->SetBinLabel(8,"PxR");
 
     hnPiTrig = new TH1D("hnPiTrig","# of Triggered pion",10,0,10);
-    hnPiTrig->GetXaxis()->SetBinLabel(1,"nPxLeft");
+    hnPiTrig->GetXaxis()->SetBinLabel(1,"nPxLeftClose");
     hnPiTrig->GetXaxis()->SetBinLabel(2,"nPxLeftClose");
     hnPiTrig->GetXaxis()->SetBinLabel(3,"nPxLeftFar");
-    hnPiTrig->GetXaxis()->SetBinLabel(4,"nPxRight");
+    hnPiTrig->GetXaxis()->SetBinLabel(4,"nPxRightClose");
     hnPiTrig->GetXaxis()->SetBinLabel(5,"nPxRightClose");
     hnPiTrig->GetXaxis()->SetBinLabel(6,"nPxRightFar");
     hnPiTrig->GetXaxis()->SetBinLabel(7,"nBothLeftRight");
@@ -629,13 +740,19 @@ void bookHistograms()
     hAssocPt = new TH1D("hAssocPt","hAssocPt;p_{T}^{assoc} (GeV/c)",400,0,20);
     hLeftAssocPt = new TH1D("hLeftAssocPt"," -1.0 < #eta < -0.5  p_{T}^{assoc} ;p_{T}^{assoc} (GeV/c)",400,0,20);
     hRightAssocPt = new TH1D("hRightAssocPt"," 0.5 < #eta < 1.0  p_{T}^{assoc} ;p_{T}^{assoc} (GeV/c)",400,0,20);
+    hRightAssocEta = new TH1D("hRightAssocEta"," PxR ;#eta",200,-1,1);
+
+    hDetaDphiVsPtReal = new THnSparseD("hDetaDphiVsPtReal","for Check & Compare ;p_{T trig} (GeV/c);p_{T assoc} (GeV/c);#Delta#eta;#Delta#phi",dimCor,nCorBins,CorlowBins,CorupBins);
 
     hDetaDphiVsPtPxLeftClose = new THnSparseD("hDetaDphiVsPtPxLeftClose","Px  -1.0 < #eta < -0.5  close region ;p_{T trig} (GeV/c);p_{T assoc} (GeV/c);#Delta#eta;#Delta#phi",dimCor,nCorBins,CorlowBins,CorupBins);
     hDetaDphiVsPtPxLeftFar = new THnSparseD("hDetaDphiVsPtPxLeftFar"," Px  -1.0 < #eta < -0.5 far region ;p_{T trig} (GeV/c);p_{T assoc} (GeV/c);#Delta#eta;#Delta#phi",dimCor,nCorBins,CorlowBins,CorupBins);
     hDetaDphiVsPtPxRightClose = new THnSparseD("hDetaDphiVsPtPxRightClose"," Px  0.5 < #eta < 1.0  close region ;p_{T trig} (GeV/c);p_{T assoc} (GeV/c);#Delta#eta;#Delta#phi",dimCor,nCorBins,CorlowBins,CorupBins);
     hDetaDphiVsPtPxRightFar = new THnSparseD("hDetaDphiVsPtPxRightFar"," Px  0.5 < #eta < 1.0  far region ;p_{T trig} (GeV/c);p_{T assoc} (GeV/c);#Delta#eta;#Delta#phi",dimCor,nCorBins,CorlowBins,CorupBins);
 
-    hDetaDphiVsPtMix = new THnSparseD("hDetaDphiVsPtMix","mixevent ;p_{T trig} (GeV/c);p_{T assoc} (GeV/c);#Delta#eta;#Delta#phi",dimCor,nCorBins,CorlowBins,CorupBins);
+    hDetaDphiVsPtMixPxLClose = new THnSparseD("hDetaDphiVsPtMixPxLClose","mixevent ;p_{T trig} (GeV/c);p_{T assoc} (GeV/c);#Delta#eta;#Delta#phi",dimCor,nCorBins,CorlowBins,CorupBins);
+    hDetaDphiVsPtMixPxRClose = new THnSparseD("hDetaDphiVsPtMixPxRClose","mixevent ;p_{T trig} (GeV/c);p_{T assoc} (GeV/c);#Delta#eta;#Delta#phi",dimCor,nCorBins,CorlowBins,CorupBins);
+    hDetaDphiVsPtMixPxLFar = new THnSparseD("hDetaDphiVsPtMixPxLFar","mixevent ;p_{T trig} (GeV/c);p_{T assoc} (GeV/c);#Delta#eta;#Delta#phi",dimCor,nCorBins,CorlowBins,CorupBins);
+    hDetaDphiVsPtMixPxRFar = new THnSparseD("hDetaDphiVsPtMixPxRFar","mixevent ;p_{T trig} (GeV/c);p_{T assoc} (GeV/c);#Delta#eta;#Delta#phi",dimCor,nCorBins,CorlowBins,CorupBins);
 }
 //--------------------------------------------
 void writeHistograms(char* outFile)
@@ -660,11 +777,17 @@ void writeHistograms(char* outFile)
     hAssocPt->Write();
     hLeftAssocPt->Write();
     hRightAssocPt->Write();
+    hRightAssocEta->Write();
+
+    hDetaDphiVsPtReal -> Write();
 
     hDetaDphiVsPtPxLeftClose -> Write();
     hDetaDphiVsPtPxLeftFar -> Write();
     hDetaDphiVsPtPxRightClose -> Write();
     hDetaDphiVsPtPxRightFar -> Write();
 
-    hDetaDphiVsPtMix -> Write();
+    hDetaDphiVsPtMixPxLClose -> Write();
+    hDetaDphiVsPtMixPxRClose -> Write();
+    hDetaDphiVsPtMixPxLFar -> Write();
+    hDetaDphiVsPtMixPxRFar -> Write();
 }
