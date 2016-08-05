@@ -19,8 +19,8 @@ Float_t  mVpdVz;
 Float_t  mTpcVx;
 Float_t  mTpcVy;
 Float_t  mTpcVz;
-Float_t  mPxL;
-Float_t  mPxR;
+Float_t  mPxL; -> mPxL[mMax]
+Float_t  mPxR; -> mPxR[mMax] -> every match with MTD particle have Px value
 
 //track information
 Short_t    mNTrk;
