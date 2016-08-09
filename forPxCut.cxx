@@ -67,6 +67,8 @@ TH2D *hCen16VsPxR;
 void bookHistograms();
 void writeHistograms(char* outFile);
 Bool_t passPion(miniDst* evt);
+void comparePt(TLorentzVector* vec1 ,TLorentzVector* vec2);
+void comparePt(TLorentzVector* vec1 ,TLorentzVector* vec2, Float_t *parL1, Float_t *parL2, Float_t *parR1, Float_t *parR2);
 
 const Bool_t debug = 0;
 //---global--var---------------
@@ -81,6 +83,8 @@ Double_t reWeight = 1.;
 //------------------------------
 
 LorentzVec PiCandidate;
+FloatVec vecPxL;
+FloatVec vecPxR;
 
 //----------------------------------
 
@@ -112,7 +116,7 @@ int main(int argc, char** argv)
         if(inputStream->good()) {
             TFile *ftmp = new TFile(filename);
             if(!ftmp||!(ftmp->IsOpen())||!(ftmp->GetNkeys())) {
-                cout<<"something wrong"<<endl;
+                cout<<"something wrong: "<<filename<<endl;
             } else {
                 if(debug) cout<<"read in "<<ifile<<"th file: "<<filename<<endl;
                 chain->Add(filename);
@@ -143,14 +147,14 @@ int main(int argc, char** argv)
         hEvent->Fill(0.5);
 
         PiCandidate.clear();
+        vecPxL.clear();
+        vecPxR.clear();
 
         //--parameters--global-----
         NTrks = event->mNTrk;
         vz = event -> mTpcVz ;
         centrality9 = event -> mCentrality9;
         centrality16 = event -> mCentrality16;
-        PxL = event -> mPxL;
-        PxR = event -> mPxR;
         //----------------------------
 
         if(!passPion(event)) continue;//Get PiCandidate
@@ -159,10 +163,14 @@ int main(int argc, char** argv)
         if(debug) cout<<"nPi: "<< nPi <<endl;
         hEvent->Fill(1.5);
 
-        hCen9VsPxL->Fill(centrality9,PxL);
-        hCen9VsPxR->Fill(centrality9,PxR);
-        hCen16VsPxL->Fill(centrality16,PxL);
-        hCen16VsPxR->Fill(centrality16,PxR);
+        for(Int_t i=1; i<nPi; i++){
+            comparePt(&PiCandidate[0],&PiCandidate[i],&vecPxL[0],&vecPxL[i],&vecPxR[0],&vecPxR[i]);
+        }
+
+        hCen9VsPxL->Fill(centrality9,vecPxL[0]);
+        hCen9VsPxR->Fill(centrality9,vecPxR[0]);
+        hCen16VsPxL->Fill(centrality16,vecPxL[0]);
+        hCen16VsPxR->Fill(centrality16,vecPxR[0]);
     }
 
     timer.Stop();
@@ -173,12 +181,52 @@ int main(int argc, char** argv)
     timer.Print();
     return 0;
 }
+//------------------------------------------
+void comparePt(TLorentzVector* vec1 ,TLorentzVector* vec2)
+{
+    TLorentzVector pi1=*vec1;
+    TLorentzVector pi2=*vec2;
+    Float_t pt1 = pi1.Pt();
+    Float_t pt2 = pi2.Pt();
+    TLorentzVector vec;
+    if(pt1<pt2) {
+        vec=*vec1;
+        *vec1=*vec2;
+        *vec2=vec;
+    }
+}
+//------------------------------------------
+void comparePt(TLorentzVector* vec1 ,TLorentzVector* vec2, Float_t *parL1, Float_t *parL2, Float_t *parR1, Float_t *parR2)
+{
+    TLorentzVector pi1=*vec1;
+    TLorentzVector pi2=*vec2;
+    Float_t pt1 = pi1.Pt();
+    Float_t pt2 = pi2.Pt();
+    TLorentzVector vec;
+    Float_t pxL;
+    Float_t pxR;
+    if(pt1<pt2) {
+        vec=*vec1;
+        *vec1=*vec2;
+        *vec2=vec;
+        pxL=*parL1;
+        *parL1=*parL2;
+        *parL2=pxL;
+        pxR=*parR1;
+        *parR1=*parR2;
+        *parR2=pxR;
+    }
+}
 //-------------------------------------------
 Bool_t passPion(miniDst* evt)
 {
     for(Int_t i=0;i<NTrks;i++){
         Float_t nSigmaPi = evt -> mnSigmaPi[i];
         if(!(nSigmaPi>0. && nSigmaPi<3.)) continue;
+        Float_t pxL = evt -> mPxL[i];
+        vecPxL.push_back(pxL);
+        Float_t pxR = evt -> mPxR[i];
+        vecPxR.push_back(pxR);
         Float_t pt = evt -> mTrkPt[i];
         Float_t eta = evt -> mTrkEta[i];
         Float_t phi = evt -> mTrkPhi[i];

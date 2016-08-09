@@ -96,7 +96,7 @@ const Double_t CorupBins[dimCor]={20,20,1.6,1.5*3.1415926};
 //----define-function---
 void bookHistograms();
 void writeHistograms(char* outFile);
-Bool_t passEvent(miniDst* evt);
+Bool_t passEvent(miniDst* evt, Int_t nTrks);
 Bool_t passPion(miniDst* evt,Int_t nTrks);
 Bool_t passPionForReal(LorentzVec vec);
 Bool_t isPxEvent(Float_t Px,Short_t cen,Float_t PxCut);
@@ -109,11 +109,12 @@ void copyToBufferPxLFar();
 void copyToBufferPxRClose();
 void copyToBufferPxRFar();
 void comparePt(TLorentzVector* vec1 ,TLorentzVector* vec2);
+void comparePt(TLorentzVector* vec1 ,TLorentzVector* vec2, Float_t *parL1, Float_t *parL2, Float_t *parR1, Float_t *parR2);
 
 const Bool_t debug = 0;
 
-const float PxLcut[9]={-3.25,-5.75,-9.75,-14.75,-20.75,-27.75,-31.75,-37.25,-38.25};
-const float PxRcut[9]={-3.75,-6.25,-10.25,-15.75,-22.25,-29.75,-34.25,-40.25,-41.75};
+const float PxLcut[9]={-3.25,-5.75,-9.75,-14.75,-20.75,-26.25,-30.25,-35.75,-37.25};
+const float PxRcut[9]={-3.75,-6.25,-10.25,-15.75,-22.25,-28.75,-32.75,-38.75,-40.25};
 
 //---global--var---------------
 Float_t  vz = 0.;//tpc vz
@@ -130,6 +131,8 @@ Double_t reWeight = 1.;
 //------------------------------
 
 LorentzVec PiCandidate;
+FloatVec vecPxL;
+FloatVec vecPxR;
 LorentzVec PiTrig;
 LorentzVec PiAssoc;
 //assoc
@@ -226,6 +229,8 @@ int main(int argc, char** argv)
         PiTrig.clear();
         PiAssoc.clear();
         PiCandidate.clear();
+        vecPxL.clear();
+        vecPxR.clear();
         //assoc
         PxLeftPiClose.clear();
         PxLeftPiFar.clear();
@@ -242,29 +247,38 @@ int main(int argc, char** argv)
         vz = event -> mTpcVz;
         centrality9 = event -> mCentrality9;
         centrality16 = event -> mCentrality16;
-        PxL = event -> mPxL;
-        PxR = event -> mPxR;
-        //----------------------------
-        if(!passEvent(event)) continue;
+
+        //-----save--Px--value------------------
+        if(!passEvent(event,NTrk)) continue;
         hEvent->Fill(0.5);
 
-        //get cen vz  pointer
+        //----2pion--event--cut---------
+        Int_t nPi = PiCandidate.size();
+        if(debug) cout<<"# of pion candidate: "<<nPi<<endl;
+        if(nPi<2) continue;
+        hEvent->Fill(1.5);
+
+        //-----choose--px--value---------------
+        for(Int_t i=1; i<nPi; i++){
+            comparePt(&PiCandidate[0],&PiCandidate[i],&vecPxL[0],&vecPxL[i],&vecPxR[0],&vecPxR[i]);
+        }
+
+        //-----get--cen--vz---pointer
         cenPointer = centrality9;
         vzPointer = (Int_t)( (vz+VzCut)/(2*VzCut)*mVzBins );
 
-        isPxL = isPxEvent(PxL,cenPointer,PxLcut[cenPointer]);
-        isPxR = isPxEvent(PxR,cenPointer,PxRcut[cenPointer]);
+        isPxL = isPxEvent(vecPxL[0],cenPointer,PxLcut[cenPointer]);
+        isPxR = isPxEvent(vecPxR[0],cenPointer,PxRcut[cenPointer]);
 
-        if(!isPiTrgEvent(event,NTrk)) continue;//Get PiCandidate
+        //if(!isPiTrgEvent(event,NTrk)) continue;//Get PiCandidate
 
         //---Fill event
-        hEvent->Fill(1.5);
         if(!isPxL && !isPxR) hEvent->Fill(2.5);
         if(isPxL && !isPxR) hEvent->Fill(3.5);
         if(!isPxL && isPxR) hEvent->Fill(4.5);
         if(isPxL && isPxR) hEvent->Fill(5.5);
 
-        if(!passPion(event,NTrk)) continue;//Get Pion Candidate
+        //if(!passPion(event,NTrk)) continue;//Get Pion Candidate
 
         //*********for check******************
         PiTrig.push_back(PiCandidate[0]);
@@ -414,8 +428,31 @@ void comparePt(TLorentzVector* vec1 ,TLorentzVector* vec2)
 
 }
 //------------------------------------------
-Bool_t passEvent(miniDst* evt)
+void comparePt(TLorentzVector* vec1 ,TLorentzVector* vec2, Float_t *parL1, Float_t *parL2, Float_t *parR1, Float_t *parR2)
 {
+    TLorentzVector pi1=*vec1;
+    TLorentzVector pi2=*vec2;
+    Float_t pt1 = pi1.Pt();
+    Float_t pt2 = pi2.Pt();
+    TLorentzVector vec;
+    Float_t pxL;
+    Float_t pxR;
+    if(pt1<pt2) {
+        vec=*vec1;
+        *vec1=*vec2;
+        *vec2=vec;
+        pxL=*parL1;
+        *parL1=*parL2;
+        *parL2=pxL;
+        pxR=*parR1;
+        *parR1=*parR2;
+        *parR2=pxR;
+    }
+}
+//------------------------------------------
+Bool_t passEvent(miniDst* evt, Int_t nTrks)
+{
+    //--for Check----
     Double_t vpdVz = evt->mVpdVz;
     Double_t tpcVx = evt->mTpcVx;
     Double_t tpcVy = evt->mTpcVy;
@@ -430,6 +467,21 @@ Bool_t passEvent(miniDst* evt)
     hRefMult->Fill(grefMult);
     hGRefMultvsGRefMultCorr->Fill(grefMultCorr,grefMult);
 
+    //--pass PionCandidate and px value
+    for(Int_t i=0;i<nTrks;i++){
+        Float_t pt = evt->mTrkPt[i];
+        Float_t eta = evt->mTrkEta[i];
+        Float_t phi = evt->mTrkPhi[i];
+        Float_t sigmaPi = evt->mnSigmaPi[i];
+        if(!(sigmaPi>0. && sigmaPi<3.)) continue;//choose pion and save
+        Float_t pxL = evt -> mPxL[i];
+        vecPxL.push_back(pxL);
+        Float_t pxR = evt -> mPxR[i];
+        vecPxR.push_back(pxR);
+        TLorentzVector fourmom(0,0,0,0);
+        fourmom.SetPtEtaPhiM(pt,eta,phi,Mpi);
+        PiCandidate.push_back(fourmom);
+    }
     return kTRUE;
 }
 //-------------------------------------------
