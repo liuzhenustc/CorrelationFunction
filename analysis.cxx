@@ -196,7 +196,7 @@ int main(int argc, char** argv)
         if(inputStream->good()) {
             TFile *ftmp = new TFile(filename);
             if(!ftmp||!(ftmp->IsOpen())||!(ftmp->GetNkeys())) {
-                cout<<"something wrong"<<endl;
+                cout<<"something wrong: "<< filename <<endl;
             } else {
                 if(debug) cout<<"read in "<<ifile<<"th file: "<<filename<<endl;
                 chain->Add(filename);
