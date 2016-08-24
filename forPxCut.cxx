@@ -58,6 +58,8 @@ const Float_t Mpi = 0.13957;//GeV
 
 //--histogram
 TH1D *hEvent;
+TH1D *hCentrality9;
+TH1D *hCentrality16;
 TH2D *hCen9VsPxL;
 TH2D *hCen9VsPxR;
 TH2D *hCen16VsPxL;
@@ -171,6 +173,8 @@ int main(int argc, char** argv)
         hCen9VsPxR->Fill(centrality9,vecPxR[0]);
         hCen16VsPxL->Fill(centrality16,vecPxL[0]);
         hCen16VsPxR->Fill(centrality16,vecPxR[0]);
+        hCentrality9 -> Fill(centrality9);
+        hCentrality16 -> Fill(centrality16);
     }
 
     timer.Stop();
@@ -243,7 +247,10 @@ void bookHistograms()
     hEvent = new TH1D("hEvent","# of Event",5,0,5);
     hEvent->GetXaxis()->SetBinLabel(1,"all dimuon event");
     hEvent->GetXaxis()->SetBinLabel(2,"pass 2pion cut");
-   
+
+    hCentrality9 = new TH1D("hCentrality9","9 Centrality Bin; Centrality",9,0,9);
+    hCentrality16 = new TH1D("hCentrality16","16 Centrality Bin; Centrality",16,0,16);
+
     hCen9VsPxL = new TH2D("hCen9VsPxL","PxL vs 9 Centrality Bin; Centrality; PxL",9,0,9,180,-70,20);
     hCen9VsPxR = new TH2D("hCen9VsPxR","PxR vs 9 Centrality Bin; Centrality; PxR",9,0,9,180,-70,20);
     hCen16VsPxL = new TH2D("hCen16VsPxL","PxL vs 16 Centrality Bin; Centrality; PxL",16,0,16,180,-70,20);
@@ -259,6 +266,8 @@ void writeHistograms(char* outFile)
     mFile->cd();
 
     hEvent    -> Write(); 
+    hCentrality16 -> Write();
+    hCentrality9 -> Write();
     hCen9VsPxL -> Write(); 
     hCen9VsPxR -> Write(); 
     hCen16VsPxL -> Write(); 
