@@ -14,11 +14,14 @@ const Int_t Cen[nCenBin+1]={0,1,2,3,4,5,6,7,8,9};
 
 int cen9PxCut()
 {
-    fin = TFile::Open("forPxCut.histo.root","read");
+    fin = TFile::Open("allData.root","read");
     
+    TH1D *hEvent = (TH1D*) fin -> Get("hEvent");
+    TH1D *hCentrality9 = (TH1D*) fin -> Get("hCentrality9");
     TH2D *hCenVsPxL = (TH2D*) fin -> Get("hCen9VsPxL");
     TH2D *hCenVsPxR = (TH2D*) fin -> Get("hCen9VsPxR");
 
+    TCanvas *c1 = new TCanvas("c1","c1",0,0,1200,400);
     TCanvas *c2 = new TCanvas("c2","c2",0,0,1200,900);
 
     hCenVsPxL->Sumw2();
@@ -76,6 +79,13 @@ int cen9PxCut()
         pxRCut[i] = hPxR[i]->GetBinCenter(jPxBin);
     }
     
+    c1->Divide(2,1);
+    c1->cd(1);hEvent->Draw();
+    c1->cd(2);hCentrality9->Draw();
+
+    cout<<"all dimuon event: "<<hEvent->GetBinContent(1)<<endl;
+    cout<<"pass 2pion cut: "<<hEvent->GetBinContent(2)<<endl;
+
     cout<<"pxL cut:"<<endl;
     for(int i=0;i<nCenBin;++i)
         cout<<pxLCut[i]<<",";

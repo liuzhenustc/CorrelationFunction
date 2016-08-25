@@ -113,8 +113,8 @@ void comparePt(TLorentzVector* vec1 ,TLorentzVector* vec2, Float_t *parL1, Float
 
 const Bool_t debug = 0;
 
-const float PxLcut[9]={-3.25,-5.75,-9.75,-14.75,-20.75,-26.25,-30.25,-35.75,-37.25};
-const float PxRcut[9]={-3.75,-6.25,-10.25,-15.75,-22.25,-28.75,-32.75,-38.75,-40.25};
+const float PxLcut[9]={-3.75,-5.75,-9.75,-14.75,-20.75,-27.25,-31.25,-36.75,-38.25};
+const float PxRcut[9]={-3.75,-6.25,-10.25,-15.75,-22.25,-29.25,-33.25,-39.75,-41.25};
 
 //---global--var---------------
 Float_t  vz = 0.;//tpc vz
@@ -128,6 +128,7 @@ Bool_t   isPxR;
 Bool_t   isPion;
 Int_t    iran = 0;
 Double_t reWeight = 1.;
+Int_t runId = 0;
 //------------------------------
 
 LorentzVec PiCandidate;
@@ -242,11 +243,20 @@ int main(int argc, char** argv)
         PxRTrigPiClose.clear();
         PxRTrigPiFar.clear();
 
+        //---debug---
+        runId = event -> mEventId;
+        if(debug) {
+            cout<<"show: "<<i<<endl;
+            cout<<"runId: "<<runId<<endl;
+        }
+
         //--parameters--global-----
         NTrk = event -> mNTrk;
         vz = event -> mTpcVz;
         centrality9 = event -> mCentrality9;
+        if(centrality9 < 0) continue;
         centrality16 = event -> mCentrality16;
+        if(centrality16 < 0) continue;
 
         //-----save--Px--value------------------
         if(!passEvent(event,NTrk)) continue;
